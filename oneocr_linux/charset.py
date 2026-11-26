@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 FIRST_CODEPOINT = 32
 CJK_HEAD = 32632
@@ -71,5 +72,8 @@ def decode_ctc(tokens, blank: int, classes: int = CJK_HEAD) -> str:
         prev = t
     text = "".join(out)
     if classes in RTL_HEADS:
+        # RTL: mirror the whole run, then restore the digit runs (digits stay LTR)
         text = text[::-1]
+        text = re.sub(r"[0-9\u0660-\u0669\u06f0-\u06f9]{2,}",
+                      lambda m: m.group()[::-1], text)
     return text
