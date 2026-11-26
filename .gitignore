@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# extracted engine weights (~58 MB) and the closed-source runtime copies
+models/
+tools/runtime/
+
+# test screenshots contain real product installation IDs
+samples/uploads/
+samples/batch_*.json
+samples/linux10.json
+samples/compare_result.json
+
+# local secrets
+.env
