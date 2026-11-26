@@ -7,4 +7,4 @@ runtime code in this package only needs onnxruntime + numpy + Pillow.
 
 from .pipeline import OcrEngine, OcrLine, recognize_image  # noqa: F401
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
