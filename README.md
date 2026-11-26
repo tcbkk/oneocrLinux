@@ -134,6 +134,32 @@ oneocr-linux samples/sample.png
 `deploy/install.sh` 封装了同样的步骤；`deploy/move_to_home.sh` 用于把已有的
 `/opt` 部署整体迁到 `~/oneocr_linux` 并重建单文件。
 
+## 接入 TGBotNet（替换 RapidOCR）
+
+`TGBotNet/ocr/ocr_server.py` 是一个 HTTP OCR 服务，原来用 RapidOCR，1400 行后处理
+（多档预处理、瓦片切分、9 组窗口投票、组校验位）与引擎无关。`integrations/oneocr_compat.py`
+把 oneocr 包装成 RapidOCR 的两个入口（`ENGINE(img)` 和 `ENGINE.text_recognizer(crops)`），
+所以**只换引擎、后处理全保留**：
+
+```bash
+# 1) 把 oneocr_linux/、models/onnx/、oneocr_compat.py 放进 ocr 目录
+# 2) 给 ocr_server.py 打补丁（新增 make_engine()，按 OCR_ENGINE 选引擎）
+python3 integrations/patch_online.py
+# 3) systemd 里加环境变量后重启
+Environment=OCR_ENGINE=oneocr
+Environment=ONEOCR_MODELS=/home/ubuntu/TGBotNet/ocr/models/onnx
+```
+
+`integrations/switch_to_oneocr.sh` + `restart_ocr.sh` 是完整脚本，回滚只需
+`OCR_ENGINE=rapid` 再重启。
+
+同一批 7 张安装 ID 样本、同一套后处理，只换引擎的对比（`integrations/bench_engines.py`）：
+
+| 引擎 | 完全正确 | 组准确率 | 7 张耗时 |
+| --- | --- | --- | --- |
+| RapidOCR | 5/7 | 93.7% | 11.2 s |
+| oneocr | **7/7** | **100%** | **2.3 s** |
+
 ## 已知限制
 
 1. **中文词表是重建值**：`charset.json` 由逐字探测得到，不是官方表；常用字覆盖良好，
