@@ -9,6 +9,8 @@ dist/
 # extracted engine weights (~58 MB) and the closed-source runtime copies
 models/
 tools/runtime/
+tools/runtime_sys/
+tools/runtime_sys_plain/
 
 # test screenshots contain real product installation IDs
 samples/uploads/
