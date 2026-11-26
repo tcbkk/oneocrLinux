@@ -77,7 +77,7 @@ def windows_engine(runtime=None):
             dll.GetOcrLine(inst, i, ctypes.byref(line))
             ptr = ctypes.c_void_p()
             dll.GetOcrLineContent(line, ctypes.byref(ptr))
-            text = ctypes.string_at(ptr.value).decode("gbk", "replace")
+            text = ctypes.string_at(ptr.value).decode("utf-8", "replace")
             bp = ctypes.c_void_p()
             dll.GetOcrLineBoundingBox(line, ctypes.byref(bp))
             box = [round(ctypes.cast(bp, ctypes.POINTER(ctypes.c_float))[k], 1) for k in range(8)]

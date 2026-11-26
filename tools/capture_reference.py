@@ -79,7 +79,7 @@ def main():
         dll.GetOcrLine(inst, i, ctypes.byref(line))
         c = ctypes.c_void_p()
         dll.GetOcrLineContent(line, ctypes.byref(c))
-        text = ctypes.string_at(c.value).decode("gbk", "replace")
+        text = ctypes.string_at(c.value).decode("utf-8", "replace")
         wc = ctypes.c_longlong()
         dll.GetOcrLineWordCount(line, ctypes.byref(wc))
         words = []
@@ -88,7 +88,7 @@ def main():
             dll.GetOcrWord(line, j, ctypes.byref(wd))
             s = ctypes.c_void_p()
             dll.GetOcrWordContent(wd, ctypes.byref(s))
-            words.append({"text": ctypes.string_at(s.value).decode("gbk", "replace"), "box": wbox(wd)})
+            words.append({"text": ctypes.string_at(s.value).decode("utf-8", "replace"), "box": wbox(wd)})
         lines.append({
             "text": text,
             "box": bbox(line),
