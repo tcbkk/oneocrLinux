@@ -1,4 +1,4 @@
-"""High level OCR pipeline."""
+"""High level OCR pipeline with automatic script/head selection."""
 
 from __future__ import annotations
 
@@ -9,6 +9,15 @@ from typing import List, Optional
 import numpy as np
 
 from . import detector, models, recognizer
+
+# script_classifier (model_002) id -> recognizer head
+SCRIPT_TO_HEAD = {
+    1: 32632,   # Han / kana / hangul
+    2: 32632,   # Latin (any head shares ASCII)
+    3: 415,     # Cyrillic
+    4: 221,     # Arabic
+    5: 237,     # Devanagari
+}
 
 
 @dataclass
@@ -41,13 +50,44 @@ class OcrEngine:
 
     def __init__(self, models_root: str, intra_threads: int = 0,
                  recognizer_classes: Optional[int] = None,
-                 score_threshold: float = 0.5):
+                 score_threshold: float = 0.5,
+                 auto_script: bool = True):
         self.bundle = models.discover(models_root)
         self.sessions = models.SessionPool(intra_threads=intra_threads)
         self.score_threshold = score_threshold
-        self.recognizer_path = recognizer.pick_recognizer(
-            self.bundle.recognizers, recognizer_classes)
+        self.auto_script = auto_script and bool(self.bundle.script_classifier)
+        self.default_classes = recognizer_classes or max(self.bundle.recognizers)
+        self._script_sess = None if not self.auto_script else None
 
+    # ------------------------------------------------------------------ head
+    def _pick_head(self, crop: np.ndarray) -> int:
+        if not self.auto_script:
+            return self.default_classes
+        try:
+            if self._script_sess is None:
+                self._script_sess = self.sessions.get(self.bundle.script_classifier)
+            resized = recognizer._resize_height(crop)
+            w = resized.shape[1]
+            tensor = np.ascontiguousarray(
+                resized.transpose(2, 0, 1)[None].astype(np.float32) / 255.0)
+            outs = self._script_sess.run(None, {"data": tensor})
+            names = [o.name for o in self._script_sess.get_outputs()]
+            score = None
+            for name, val in zip(names, outs):
+                if name == "script_id_score":
+                    score = np.asarray(val).reshape(-1)
+                    break
+            if score is None:
+                return self.default_classes
+            sid = int(np.argmax(score))
+            head = SCRIPT_TO_HEAD.get(sid)
+            if head and head in self.bundle.recognizers:
+                return head
+        except Exception:
+            pass
+        return self.default_classes
+
+    # ------------------------------------------------------------- recognize
     def recognize(self, image) -> OcrResult:
         """Recognize a path or an RGB uint8 ndarray."""
         from PIL import Image
@@ -75,7 +115,8 @@ class OcrEngine:
                 crop = array[max(0, y1):min(height, y2), max(0, x1):min(width, x2)]
             if crop.size == 0:
                 continue
-            rec = recognizer.recognize_crop(self.sessions, self.recognizer_path, crop)
+            head = self._pick_head(crop)
+            rec = recognizer.recognize_crop(self.sessions, self.bundle.recognizers[head], crop)
             if not rec.text:
                 continue
             lines.append(OcrLine(text=rec.text, box=[round(v, 2) for v in box.as_list()],

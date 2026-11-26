@@ -1,9 +1,9 @@
-"""Token table used by the OneOCR recognizers.
+"""Per-head token tables used by the OneOCR recognizers.
 
-The recognizers are CTC heads. The first 95 tokens are plain ASCII
-(``chr(i + 32)``); everything above is a private ordering, so Chinese must come
-from a recovered table (`data/charset.json`, built by ``tools/build_charset.py``
-by probing each glyph). Tokens outside the table fall back to ``chr(i + 32)``.
+Every recognizer head has its own private ordering above token 95 (ASCII).
+Tables are recovered by probing each glyph (``tools/build_charset_multi.py``)
+and stored as ``data/charset_<classes>.json``; the 32632 CJK head also loads
+the larger Chinese table in ``data/charset.json``.
 """
 
 from __future__ import annotations
@@ -12,50 +12,64 @@ import json
 import os
 
 FIRST_CODEPOINT = 32
+CJK_HEAD = 32632
+# right-to-left heads: the recognizer emits visual order, we reverse to logical
+RTL_HEADS = {221}
 
-_TABLE = None
-
-
-def _table():
-    global _TABLE
-    if _TABLE is None:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "charset.json")
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            _TABLE = {int(k): v for k, v in data.get("tokens", {}).items()}
-        except (OSError, ValueError):
-            _TABLE = {}
-    return _TABLE
+_CACHE = {}
 
 
-def token_to_char(token: int) -> str:
-    """Map a class index to its character. Raises ValueError for the blank index."""
+def _load_file(name):
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", name)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return {int(k): v for k, v in json.load(f).get("tokens", {}).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+def table_for(classes: int):
+    if classes in _CACHE:
+        return _CACHE[classes]
+    merged = {}
+    if classes == CJK_HEAD:
+        merged.update(_load_file("charset.json"))
+    merged.update(_load_file("charset_%d.json" % classes))
+    _CACHE[classes] = merged
+    return merged
+
+
+def token_to_char(token: int, classes: int = CJK_HEAD) -> str:
     if token < 0:
         raise ValueError("negative token id")
-    if token < 95:  # ASCII block is exact, never trust the probe table here
+    if token < 95:  # ASCII block is exact in every head
         return chr(token + FIRST_CODEPOINT)
-    ch = _table().get(token)
+    ch = table_for(classes).get(token)
     if ch is not None:
         return ch
     return chr(token + FIRST_CODEPOINT)
 
 
-def decode_ctc(tokens, blank: int) -> str:
-    """Greedy CTC decode: drop blanks, collapse runs, map ids to characters."""
-    table = _table()
+def decode_ctc(tokens, blank: int, classes: int = CJK_HEAD) -> str:
+    """Greedy CTC decode; RTL heads are reversed back to logical order.
+
+    Collapsing runs happens in time order first (CTC semantics); only the
+    resulting character sequence is mirrored for RTL scripts.
+    """
+    table = table_for(classes)
     out = []
     prev = -1
     for t in tokens:
         t = int(t)
         if t != prev and t != blank:
-            ch = chr(t + FIRST_CODEPOINT) if t < 95 else table.get(t)
-            if ch is None:
-                if t + FIRST_CODEPOINT <= 0x10FFFF:
-                    ch = chr(t + FIRST_CODEPOINT)
-                else:
-                    ch = ""
+            if t < 95:
+                ch = chr(t + FIRST_CODEPOINT)
+            else:
+                ch = table.get(t, "?")
             if ch:
                 out.append(ch)
         prev = t
-    return "".join(out)
+    text = "".join(out)
+    if classes in RTL_HEADS:
+        text = text[::-1]
+    return text

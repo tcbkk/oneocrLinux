@@ -46,7 +46,7 @@ def recognize_crop(session_pool: SessionPool, model_path: str, crop_rgb: np.ndar
     blank = classes - 1
     ids = logits.argmax(-1)
 
-    text = decode_ctc(ids, blank)
+    text = decode_ctc(ids, blank, classes)
     keep = ids != blank
     if keep.any():
         best = logits[keep].max(axis=-1)
