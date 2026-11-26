@@ -1,21 +1,17 @@
-"""Per-head token tables used by the OneOCR recognizers.
-
-Every recognizer head has its own private ordering above token 95 (ASCII).
-Tables are recovered by probing each glyph (``tools/build_charset_multi.py``)
-and stored as ``data/charset_<classes>.json``; the 32632 CJK head also loads
-the larger Chinese table in ``data/charset.json``.
-"""
+"""Per-head token tables used by the OneOCR recognizers."""
 
 from __future__ import annotations
 
 import json
 import os
-import re
 
 FIRST_CODEPOINT = 32
 CJK_HEAD = 32632
-# right-to-left heads: the recognizer emits visual order, we reverse to logical
+# right-to-left heads: visual order must be mirrored back to logical order
 RTL_HEADS = {221}
+# Arabic-Indic digit tokens in head 221 (visual order == ٠..٩)
+AR_DIGITS = {149: "٠", 150: "١", 151: "٢", 152: "٣", 153: "٤",
+             154: "٥", 155: "٦", 156: "٧", 157: "٨", 158: "٩"}
 
 _CACHE = {}
 
@@ -36,6 +32,8 @@ def table_for(classes: int):
     if classes == CJK_HEAD:
         merged.update(_load_file("charset.json"))
     merged.update(_load_file("charset_%d.json" % classes))
+    if classes in RTL_HEADS:
+        merged.update(AR_DIGITS)
     _CACHE[classes] = merged
     return merged
 
@@ -43,7 +41,7 @@ def table_for(classes: int):
 def token_to_char(token: int, classes: int = CJK_HEAD) -> str:
     if token < 0:
         raise ValueError("negative token id")
-    if token < 95:  # ASCII block is exact in every head
+    if token < 95:
         return chr(token + FIRST_CODEPOINT)
     ch = table_for(classes).get(token)
     if ch is not None:
@@ -51,29 +49,46 @@ def token_to_char(token: int, classes: int = CJK_HEAD) -> str:
     return chr(token + FIRST_CODEPOINT)
 
 
-def decode_ctc(tokens, blank: int, classes: int = CJK_HEAD) -> str:
-    """Greedy CTC decode; RTL heads are reversed back to logical order.
+def _bidi_tokens(tokens, classes):
+    """Mirror the token stream, but keep each run of digit tokens forward.
 
-    Collapsing runs happens in time order first (CTC semantics); only the
-    resulting character sequence is mirrored for RTL scripts.
+    Arabic runs right-to-left, so the visual token order is reversed; a run of
+    digits however is written left-to-right and must not be mirrored inside.
     """
-    table = table_for(classes)
+    toks = list(reversed(tokens))
     out = []
+    i = 0
+    while i < len(toks):
+        if classes == 221 and toks[i] in AR_DIGITS:
+            j = i
+            while j < len(toks) and toks[j] in AR_DIGITS:
+                j += 1
+            out.extend(reversed(toks[i:j]))
+            i = j
+        else:
+            out.append(toks[i])
+            i += 1
+    return out
+
+
+def decode_ctc(tokens, blank: int, classes: int = CJK_HEAD) -> str:
+    # 1) CTC collapse in time order
+    col = []
     prev = -1
     for t in tokens:
         t = int(t)
         if t != prev and t != blank:
-            if t < 95:
-                ch = chr(t + FIRST_CODEPOINT)
-            else:
-                ch = table.get(t, "?")
-            if ch:
-                out.append(ch)
+            col.append(t)
         prev = t
-    text = "".join(out)
+    # 2) bidi reorder
     if classes in RTL_HEADS:
-        # RTL: mirror the whole run, then restore the digit runs (digits stay LTR)
-        text = text[::-1]
-        text = re.sub(r"[0-9\u0660-\u0669\u06f0-\u06f9]{2,}",
-                      lambda m: m.group()[::-1], text)
-    return text
+        col = _bidi_tokens(col, classes)
+    # 3) map tokens
+    table = table_for(classes)
+    out = []
+    for t in col:
+        if t < 95:
+            out.append(chr(t + FIRST_CODEPOINT))
+        else:
+            out.append(table.get(t, "?"))
+    return "".join(out)
