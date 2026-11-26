@@ -9,17 +9,15 @@ oneocr-linux samples/sample.png
 ```
 
 ```
-# samples/sample.png (1400x520, 6 lines)
-????? Invoice 2026-11-26	[39.8, 68.8, 752.6, 112.3]
-????????????	[44.2, 152.5, 271.7, 191.1]
-???? 12,345.67	[43.6, 217.6, 306.4, 251.4]
-Order No. A1B2-C3D4-E5F6	[38.0, 273.2, 589.1, 311.8]
-?????????????????	[42.6, 342.8, 356.0, 381.5]
-support@example.com +86 755 1234 5678	[27.6, 403.1, 866.8, 446.6]
+# 真实中文截图（Windows 激活界面）
+致电并提供你的安装ID	[33.3, 12.7, 230.6, 28.4]
+拨打下面某个号码,自动电话系统将询问你的安装ID(IID),...	[30.5, 43.0, 484.1, 54.3]
+阅读我们的隐私声明	[37.3, 244.3, 137.1, 253.3]
+0350016 837805S 4805974 5292126 6581472 4941320 9539080 2442223 1338645	[30.8, 216.1, 468.5, 225.1]
 ```
 
-> 输出里的 `?` 不是编码问题：原版 `oneocr.dll` 在同一台机器上对同样的图片也输出 `?`，
-> 因为它把这台机器上没装对应 OCR 语言包的中文统一退回成 `?`。详见[已知限制](#已知限制)。
+> 中文依赖 `oneocr_linux/data/charset.json`——一张逐字形探测恢复出来的 token 表。
+> 合成渲染图（PIL 画的字）识别不出，请用真实截图测试。详见[中文支持](#中文支持)。
 
 ## 原理
 
@@ -95,34 +93,58 @@ python tools\extract_models.py --image samples\sample.png --out models\raw
 
 然后把 `models/raw` 里的 12 个主链路模型按上表改名放进 `models/onnx/`。
 
+## 中文支持
+
+识别头的 32632 个 token 里，前 95 个是 ASCII（`chr(i+32)`），其余是私有顺序。
+最开始按 `chr()` 解码，中文就变成 `䨞䀔ᘪ` 之类乱码。
+
+`tools/build_charset.py` 用**逐字形探测**恢复这张表：把 7573 个候选字（GB2312 汉字
++ 全角符号 + ASCII）分别渲染成 5 种尺寸，用真实识别头读 argmax 并做置信度投票，
+生成 `oneocr_linux/data/charset.json`（6514 个 token）。
+
+效果（一张真实的 Windows 激活界面截图）：
+
+```
+致电并提供你的安装ID
+拨打下面某个号码,自动电话系统将询问你的安装ID(IID),在某些国家说地区,...
+阅读我们的隐私声明
+```
+
+数字与英文完全正确；中文有少量形近字混淆（`或→说`、`商→南`、`收费→优费`），
+来自词表冲突和低分辨率小字，不是映射错位。
+
+注意：**合成渲染图（PIL 画的中文）识别不出**，模型对真实截图的字形分布敏感；
+测试请用真实截图。
+
 ## 部署到服务器
 
 ```bash
 # 本机打包
 tar -czf oneocr-linux.tar.gz oneocr_linux models/onnx pyproject.toml samples README.md
 
-# 服务器
-scp oneocr-linux.tar.gz user@host:/opt/
+# 服务器（默认部署在 ~/oneocr_linux）
+scp oneocr-linux.tar.gz user@host:~
 ssh user@host
-cd /opt && tar -xzf oneocr-linux.tar.gz && cd oneocrLinux
+mkdir -p ~/oneocr_linux && cd ~/oneocr_linux && tar -xzf ~/oneocr-linux.tar.gz
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e .
 oneocr-linux samples/sample.png
 ```
 
-`deploy/install.sh` 封装了同样的步骤。
+`deploy/install.sh` 封装了同样的步骤；`deploy/move_to_home.sh` 用于把已有的
+`/opt` 部署整体迁到 `~/oneocr_linux` 并重建单文件。
 
 ## 已知限制
 
-1. **中文出 `?`**：本机（以及原版 DLL）对中文只能输出 `?`。原因是这台 Windows 没有安装
-   中文 OCR 语言包时，引擎把所有非 ASCII 结果退回成 `?`；这不是移植引入的回归。
-   若需要中文，需要先在 Windows 上确认原版能输出中文，再重新提取对应识别头。
-2. **辅助分类器缺失**：行布局、21 维特征二分类共 22 个模型依赖 `OneOCRFeatureExtract`，
+1. **中文词表是重建值**：`charset.json` 由逐字探测得到，不是官方表；常用字覆盖良好，
+   生僻字/形近字可能缺项或串字，未命中的 token 会回退成 `chr(i+32)`。
+2. **合成中文图识别不出**：模型只对真实截图（ClearType 渲染）稳定，PIL 合成图会输出 `?`。
+3. **辅助分类器缺失**：行布局、21 维特征二分类共 22 个模型依赖 `OneOCRFeatureExtract`，
    需要按[路线 B](docs/porting-report.md) 用 C++ 复刻算子后才能启用。
-3. **语言自动选择未接入**：`script_classifier.onnx` 可以跑，但 10 个 script_id 到 9 个识别头
+4. **语言自动选择未接入**：`script_classifier.onnx` 可以跑，但 10 个 script_id 到 9 个识别头
    的对应关系还没有标定，当前固定使用最大的 32632 头。
-4. **只支持横排文本行**：竖排依赖 `scores_vert_*` 与 `bbox_deltas_vert_*`，后处理尚未实现。
-5. **检测框精度**：连通域近似，和原版框相比约有 4–8 px 偏差，不影响识别。
+5. **只支持横排文本行**：竖排依赖 `scores_vert_*` 与 `bbox_deltas_vert_*`，后处理尚未实现。
+6. **检测框精度**：连通域近似，和原版框相比约有 4–8 px 偏差，不影响识别。
 
 ## 目录
 
