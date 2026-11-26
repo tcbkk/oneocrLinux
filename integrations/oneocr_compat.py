@@ -38,7 +38,7 @@ class OneOcrEngine:
     def __init__(self, models_root=None, threads=0):
         self._engine = OcrEngine(models_root, intra_threads=threads)
         self._pool = self._engine.sessions
-        self._rec_path = self._engine.recognizer_path
+        self._rec_path = self._engine.bundle.recognizers[self._engine.default_classes]
 
     def __call__(self, img_bgr, use_det=True, use_cls=True, use_rec=True):
         if img_bgr is None or img_bgr.size == 0:
@@ -51,6 +51,11 @@ class OneOcrEngine:
                 continue
             out.append([_quad_from_box(line.box), line.text, float(line.confidence)])
         return out, 0.0
+
+    def recognize_forced(self, img_bgr, classes):
+        """Run detect+recognize with an explicit head (e.g. 221 for Arabic)."""
+        rgb = _to_rgb(img_bgr)
+        return self._engine.recognize(rgb, forced_head=classes)
 
     def text_recognizer(self, crops):
         """Recognition-only path used by the column-projection splitter."""

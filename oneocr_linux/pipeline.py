@@ -88,8 +88,11 @@ class OcrEngine:
         return self.default_classes
 
     # ------------------------------------------------------------- recognize
-    def recognize(self, image) -> OcrResult:
-        """Recognize a path or an RGB uint8 ndarray."""
+    def recognize(self, image, forced_head: Optional[int] = None) -> OcrResult:
+        """Recognize a path or an RGB uint8 ndarray.
+
+        ``forced_head`` bypasses script detection (used by the Arabic fallback).
+        """
         from PIL import Image
 
         if isinstance(image, (str, os.PathLike)):
@@ -115,7 +118,7 @@ class OcrEngine:
                 crop = array[max(0, y1):min(height, y2), max(0, x1):min(width, x2)]
             if crop.size == 0:
                 continue
-            head = self._pick_head(crop)
+            head = forced_head if forced_head in self.bundle.recognizers else self._pick_head(crop)
             rec = recognizer.recognize_crop(self.sessions, self.bundle.recognizers[head], crop)
             if not rec.text:
                 continue
