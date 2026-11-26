@@ -1,11 +1,16 @@
-import os
-import re
+"""Patch an ocr_server.py to support OCR_ENGINE=oneocr (idempotent).
 
-OCR = "/home/ubuntu/TGBotNet/ocr/ocr_server.py"
+Usage: python3 patch_online.py [/path/to/ocr_dir]
+"""
+import os
+import sys
+
+OCR_DIR = sys.argv[1] if len(sys.argv) > 1 else "/home/ubuntu/TGBotNet/ocr"
+OCR = os.path.join(OCR_DIR, "ocr_server.py")
 src = open(OCR, encoding="utf-8").read()
 
 if "def make_engine(" in src:
-    print("already patched")
+    print("already patched:", OCR)
     raise SystemExit(0)
 
 start = src.index("    global ENGINE\n    if ENGINE is None:")
@@ -21,8 +26,8 @@ def make_engine():
     kind = os.environ.get("OCR_ENGINE", "rapid").lower()
     if kind == "oneocr":
         from oneocr_compat import OneOcrEngine
-        root = os.environ.get("ONEOCR_MODELS",
-                              "/home/ubuntu/TGBotNet/ocr/models/onnx")
+        root = os.environ.get("ONEOCR_MODELS") or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "models", "onnx")
         log.info("worker 初始化 oneocr_linux (%s)…", root)
         return OneOcrEngine(root)
     from rapidocr_onnxruntime import RapidOCR
@@ -33,4 +38,4 @@ def make_engine():
 '''
 src = src.replace("def recognize(image_bytes):", helper + "def recognize(image_bytes):", 1)
 open(OCR, "w", encoding="utf-8").write(src)
-print("patched:", "def make_engine" in src, "| lines:", len(src.splitlines()))
+print("patched:", OCR, "| lines:", len(src.splitlines()))

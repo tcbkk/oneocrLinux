@@ -160,6 +160,22 @@ Environment=ONEOCR_MODELS=/home/ubuntu/TGBotNet/ocr/models/onnx
 | RapidOCR | 5/7 | 93.7% | 11.2 s |
 | oneocr | **7/7** | **100%** | **2.3 s** |
 
+### 已切换的机器
+
+四个项目共用同一份 `ocr/ocr_server.py`，每台服务器只有一个 `ocrserver.service`（5555）：
+
+| 服务器 | 项目 | OCR 目录 | 内存 |
+| --- | --- | --- | --- |
+| 43.133.102.47 | TGBotNet / WhatsAppBot | `/home/ubuntu/TGBotNet/ocr` | 435 MB |
+| 43.152.231.22 | ntqqBot / ServerNet | `/home/ubuntu/TGBotNet/ocr` | 272 MB |
+| 43.173.51.84 | ntqqBot / WhatsAppBotNet | `/home/ubuntu/WhatsAppBotNet/ocr` | 271 MB |
+| 119.28.239.124 | PidKeyStation | `/home/ubuntu/PidKeyStation/ocr` | 448 MB |
+
+`deploy_oneocr.sh <ocr_dir>` 是幂等部署脚本，`verify_all.py` 做逐台 HTTP 验证。
+
+> `ocrar.service`（5556，阿拉伯语）**保持 RapidOCR**：oneocr 的 32632 类头实测对
+> 阿拉伯文、日文、韩文、俄文都输出 `?`，换过去会直接失去阿语能力。
+
 ## 已知限制
 
 1. **中文词表是重建值**：`charset.json` 由逐字探测得到，不是官方表；常用字覆盖良好，
