@@ -22,7 +22,10 @@ import numpy as np
 from .models import SessionPool
 
 # geometry of the preprocessing grid
-TARGET_LONG_SIDE = 1152
+# 1152 is what the original engine feeds ORT, but its SegLink post-processing
+# recovers small ID lines that our connected-component approximation drops.
+# 1600 restores them (see 1280x591 Office screenshot: 0 groups -> 9/9).
+TARGET_LONG_SIDE = 1600
 SIZE_MULTIPLE = 32
 STRIDE = 4  # finest FPN level
 
