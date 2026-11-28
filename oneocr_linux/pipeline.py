@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -45,19 +46,28 @@ class OcrResult:
         return "\n".join(ln.text for ln in self.lines)
 
 
+def iid_score(result: "OcrResult"):
+    """Rough quality key: prefer 9 seven-digit groups, then group count."""
+    txt = " ".join(ln.text for ln in result.lines)
+    groups = re.findall(r"(?<!\d)\d{7}(?!\d)", txt)
+    return (len(groups) >= 9, len(groups), len(txt))
+
+
 class OcrEngine:
     """Loads the extracted graphs once and reuses them across calls."""
 
     def __init__(self, models_root: str, intra_threads: int = 0,
                  recognizer_classes: Optional[int] = None,
                  score_threshold: float = 0.5,
-                 auto_script: bool = True):
+                 auto_script: bool = True,
+                 auto_rotate: bool = True):
         self.bundle = models.discover(models_root)
         self.sessions = models.SessionPool(intra_threads=intra_threads)
         self.score_threshold = score_threshold
         self.auto_script = auto_script and bool(self.bundle.script_classifier)
+        self.auto_rotate = auto_rotate
         self.default_classes = recognizer_classes or max(self.bundle.recognizers)
-        self._script_sess = None if not self.auto_script else None
+        self._script_sess = None
 
     # ------------------------------------------------------------------ head
     def _pick_head(self, crop: np.ndarray) -> int:
@@ -88,24 +98,8 @@ class OcrEngine:
         return self.default_classes
 
     # ------------------------------------------------------------- recognize
-    def recognize(self, image, forced_head: Optional[int] = None) -> OcrResult:
-        """Recognize a path or an RGB uint8 ndarray.
-
-        ``forced_head`` bypasses script detection (used by the Arabic fallback).
-        """
-        from PIL import Image
-
-        if isinstance(image, (str, os.PathLike)):
-            pil = Image.open(image).convert("RGB")
-            array = np.asarray(pil)
-        else:
-            array = np.asarray(image)
-            if array.ndim == 2:
-                array = np.stack([array] * 3, axis=-1)
-            if array.shape[2] == 4:
-                array = array[:, :, :3]
+    def _recognize_once(self, array: np.ndarray, forced_head: Optional[int]) -> OcrResult:
         height, width = array.shape[:2]
-
         boxes = detector.detect(self.sessions, self.bundle.detector, array,
                                 score_threshold=self.score_threshold)
         lines: List[OcrLine] = []
@@ -125,6 +119,37 @@ class OcrEngine:
             lines.append(OcrLine(text=rec.text, box=[round(v, 2) for v in box.as_list()],
                                  confidence=rec.confidence))
         return OcrResult(width=width, height=height, lines=lines)
+
+    def recognize(self, image, forced_head: Optional[int] = None) -> OcrResult:
+        """Recognize a path or an RGB uint8 ndarray.
+
+        ``forced_head`` bypasses script detection; ``auto_rotate`` retries the
+        other three orientations when the upright pass finds too few IDs
+        (phones often save activation screenshots rotated 90°).
+        """
+        from PIL import Image
+
+        if isinstance(image, (str, os.PathLike)):
+            pil = Image.open(image).convert("RGB")
+            array = np.asarray(pil)
+        else:
+            array = np.asarray(image)
+            if array.ndim == 2:
+                array = np.stack([array] * 3, axis=-1)
+            if array.shape[2] == 4:
+                array = array[:, :, :3]
+
+        best = self._recognize_once(array, forced_head)
+        if not self.auto_rotate or iid_score(best)[0]:
+            return best
+        for k in (1, 2, 3):
+            rotated = np.ascontiguousarray(np.rot90(array, k))
+            res = self._recognize_once(rotated, forced_head)
+            if iid_score(res) > iid_score(best):
+                best = res
+                if iid_score(best)[0]:
+                    break
+        return best
 
     def close(self) -> None:
         self.sessions.close()
